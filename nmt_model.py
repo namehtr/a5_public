@@ -23,16 +23,15 @@ Hypothesis = namedtuple('Hypothesis', ['value', 'score'])
 
 import random
 
-
 class NMT(nn.Module):
     """ Simple Neural Machine Translation Model:
         - Bidrectional LSTM Encoder
         - Unidirection LSTM Decoder
         - Global Attention Model (Luong, et al. 2015)
     """
-
     def __init__(self, embed_size, hidden_size, vocab, dropout_rate=0.2, no_char_decoder=False):
         """ Init NMT Model.
+
         @param embed_size (int): Embedding size (dimensionality)
         @param hidden_size (int): Hidden Size (dimensionality)
         @param vocab (Vocab): Vocabulary object containing src and tgt languages
@@ -48,26 +47,30 @@ class NMT(nn.Module):
         self.dropout_rate = dropout_rate
         self.vocab = vocab
 
-        self.encoder = nn.LSTM(embed_size, hidden_size, bidirectional=True)
-        self.decoder = nn.LSTMCell(embed_size + hidden_size, hidden_size)
-
-        self.h_projection = nn.Linear(hidden_size * 2, hidden_size, bias=False)
-        self.c_projection = nn.Linear(hidden_size * 2, hidden_size, bias=False)
-        self.att_projection = nn.Linear(hidden_size * 2, hidden_size, bias=False)
-        self.combined_output_projection = nn.Linear(hidden_size * 2 + hidden_size, hidden_size, bias=False)
-        self.target_vocab_projection = nn.Linear(hidden_size, len(vocab.tgt), bias=False)
+        ### COPY OVER YOUR CODE FROM ASSIGNMENT 4
+        self.encoder = nn.LSTM(embed_size, self.hidden_size, dropout=self.dropout_rate, bidirectional=True)
+        self.decoder = nn.LSTMCell(embed_size + self.hidden_size, self.hidden_size)
+        self.h_projection = nn.Linear(2 * self.hidden_size, self.hidden_size, bias=False)
+        self.c_projection = nn.Linear(2 * self.hidden_size, self.hidden_size, bias=False)
+        self.att_projection = nn.Linear(2 * self.hidden_size, self.hidden_size, bias=False)
+        self.combined_output_projection = nn.Linear(3 * self.hidden_size, self.hidden_size, bias=False)
+        self.target_vocab_projection = nn.Linear(self.hidden_size, len(self.vocab.tgt), bias=False)
         self.dropout = nn.Dropout(self.dropout_rate)
 
+        ### END YOUR CODE FROM ASSIGNMENT 4
+
         if not no_char_decoder:
-            self.charDecoder = CharDecoder(hidden_size, target_vocab=vocab.tgt)
+           self.charDecoder = CharDecoder(hidden_size, target_vocab=vocab.tgt)
         else:
-            self.charDecoder = None
+           self.charDecoder = None
 
     def forward(self, source: List[List[str]], target: List[List[str]]) -> torch.Tensor:
         """ Take a mini-batch of source and target sentences, compute the log-likelihood of
         target sentences under the language models learned by the NMT system.
+
         @param source (List[List[str]]): list of source sentence tokens
         @param target (List[List[str]]): list of target sentence tokens, wrapped by `<s>` and `</s>`
+
         @returns scores (Tensor): a variable/tensor of shape (b, ) representing the
                                     log-likelihood of generating the gold-standard target sentence for
                                     each example in the input batch. Here b = batch size.
@@ -94,10 +97,7 @@ class NMT(nn.Module):
         ###     - Add `source_padded_chars` for character level padded encodings for source
         ###     - Add `target_padded_chars` for character level padded encodings for target
         ###     - Modify calls to encode() and decode() to use the character level encodings
-
-        target_padded = self.vocab.tgt.to_input_tensor(target, device=self.device)  # Tensor: (tgt_len, b)
-
-        # Tensor: (max_sentence_length, batch_size, max_word_length)
+        target_padded = self.vocab.tgt.to_input_tensor(target, device=self.device)
         source_padded_chars = self.vocab.src.to_input_tensor_char(source, device=self.device)
 
         # Tensor: (max_sentence_length, batch_size, max_word_length)
@@ -115,9 +115,10 @@ class NMT(nn.Module):
         target_masks = (target_padded != self.vocab.tgt['<pad>']).float()
 
         # Compute log probability of generating true target words
-        target_gold_words_log_prob = torch.gather(P, index=target_padded[1:].unsqueeze(-1), dim=-1).squeeze(
-            -1) * target_masks[1:]
-        scores = target_gold_words_log_prob.sum()  # mhahn2 Small modification from A4 code.
+        target_gold_words_log_prob = torch.gather(P, index=target_padded[1:].unsqueeze(-1), dim=-1).squeeze(-1) * target_masks[1:]
+        scores = target_gold_words_log_prob.sum() # mhahn2 Small modification from A4 code.
+
+
 
         if self.charDecoder is not None:
             max_word_len = target_padded_chars.shape[-1]
@@ -126,16 +127,15 @@ class NMT(nn.Module):
             target_chars = target_padded_chars[1:].view(-1, max_word_len)
             target_outputs = combined_outputs.view(-1, 256)
 
-            target_chars_oov = target_chars  # torch.index_select(target_chars, dim=0, index=oovIndices)
-            rnn_states_oov = target_outputs  # torch.index_select(target_outputs, dim=0, index=oovIndices)
-            oovs_losses = self.charDecoder.train_forward(target_chars_oov.t(),
-                                                         (rnn_states_oov.unsqueeze(0), rnn_states_oov.unsqueeze(0)))
+            target_chars_oov = target_chars #torch.index_select(target_chars, dim=0, index=oovIndices)
+            rnn_states_oov = target_outputs #torch.index_select(target_outputs, dim=0, index=oovIndices)
+            oovs_losses = self.charDecoder.train_forward(target_chars_oov.t(), (rnn_states_oov.unsqueeze(0), rnn_states_oov.unsqueeze(0)))
             scores = scores - oovs_losses
 
         return scores
 
-    def encode(self, source_padded: torch.Tensor, source_lengths: List[int]) -> Tuple[
-        torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+
+    def encode(self, source_padded: torch.Tensor, source_lengths: List[int]) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """ Apply the encoder to source sentences to obtain encoder hidden states.
             Additionally, take the final states of the encoder and project them to obtain initial states for decoder.
         @param source_padded (Tensor): Tensor of padded source sentences with shape (src_len, b, max_word_length), where
@@ -149,20 +149,22 @@ class NMT(nn.Module):
         """
         enc_hiddens, dec_init_state = None, None
 
+        ### COPY OVER YOUR CODE FROM ASSIGNMENT 4
+        ### Except replace "self.model_embeddings.source" with "self.model_embeddings_source"
         X = self.model_embeddings_source(source_padded)
-        X_packed = pack_padded_sequence(X, source_lengths)
-        enc_hiddens, (last_hidden, last_cell) = self.encoder(X_packed)
-        (enc_hiddens, _) = pad_packed_sequence(enc_hiddens)
-        enc_hiddens = enc_hiddens.permute(1, 0, 2)
+        packed = pack_padded_sequence(X, source_lengths)
+        enc_hiddens, (last_hidden, last_cell) = self.encoder(packed)
+        enc_hiddens = pad_packed_sequence(enc_hiddens, batch_first=True)[0]
+        dec_init_state = (self.h_projection(torch.cat((last_hidden[0, :], last_hidden[1, :]), 1)),
+                          self.c_projection(torch.cat((last_cell[0, :], last_cell[1, :]), 1)))
 
-        init_decoder_hidden = self.h_projection(torch.cat((last_hidden[0], last_hidden[1]), dim=1))
-        init_decoder_cell = self.c_projection(torch.cat((last_cell[0], last_cell[1]), dim=1))
-        dec_init_state = (init_decoder_hidden, init_decoder_cell)
+        ### END YOUR CODE FROM ASSIGNMENT 4
 
         return enc_hiddens, dec_init_state
 
+
     def decode(self, enc_hiddens: torch.Tensor, enc_masks: torch.Tensor,
-               dec_init_state: Tuple[torch.Tensor, torch.Tensor], target_padded: torch.Tensor) -> torch.Tensor:
+                dec_init_state: Tuple[torch.Tensor, torch.Tensor], target_padded: torch.Tensor) -> torch.Tensor:
         """Compute combined output vectors for a batch.
         @param enc_hiddens (Tensor): Hidden states (b, src_len, h*2), where
                                      b = batch size, src_len = maximum source sentence length, h = hidden size.
@@ -187,25 +189,27 @@ class NMT(nn.Module):
         # Initialize a list we will use to collect the combined output o_t on each step
         combined_outputs = []
 
+        ### COPY OVER YOUR CODE FROM ASSIGNMENT 4
+        ### Except replace "self.model_embeddings.target" with "self.model_embeddings_target"
+
         enc_hiddens_proj = self.att_projection(enc_hiddens)
         Y = self.model_embeddings_target(target_padded)
-
-        for Y_t in torch.split(Y, split_size_or_sections=1):
-            Y_t = Y_t.squeeze(0)
-            Ybar_t = torch.cat([Y_t, o_prev], dim=-1)
-            dec_state, o_t, _ = self.step(Ybar_t, dec_state, enc_hiddens, enc_hiddens_proj, enc_masks)
-            combined_outputs.append(o_t)
-            o_prev = o_t
-
-        combined_outputs = torch.stack(combined_outputs)
+        for Y_t in torch.split(Y, 1):
+            Y_t_squeezed = torch.squeeze(Y_t, 0)
+            Ybar_t = torch.cat([Y_t_squeezed, o_prev], 1)
+            (dec_state, combined_output, e_t) = self.step(Ybar_t, dec_state, enc_hiddens, enc_hiddens_proj, enc_masks)
+            combined_outputs.append(combined_output)
+            o_prev = combined_output
+        combined_outputs = torch.stack(combined_outputs, dim=0)
 
         return combined_outputs
 
+
     def step(self, Ybar_t: torch.Tensor,
-             dec_state: Tuple[torch.Tensor, torch.Tensor],
-             enc_hiddens: torch.Tensor,
-             enc_hiddens_proj: torch.Tensor,
-             enc_masks: torch.Tensor) -> Tuple[Tuple, torch.Tensor, torch.Tensor]:
+            dec_state: Tuple[torch.Tensor, torch.Tensor],
+            enc_hiddens: torch.Tensor,
+            enc_hiddens_proj: torch.Tensor,
+            enc_masks: torch.Tensor) -> Tuple[Tuple, torch.Tensor, torch.Tensor]:
         """ Compute one forward step of the LSTM decoder, including the attention computation.
         @param Ybar_t (Tensor): Concatenated Tensor of [Y_t o_prev], with shape (b, e + h). The input for the decoder,
                                 where b = batch size, e = embedding size, h = hidden size.
@@ -228,9 +232,15 @@ class NMT(nn.Module):
 
         combined_output = None
 
+        ### COPY OVER YOUR CODE FROM ASSIGNMENT 4
+
         dec_state = self.decoder(Ybar_t, dec_state)
         (dec_hidden, dec_cell) = dec_state
-        e_t = torch.bmm(enc_hiddens_proj, dec_hidden.unsqueeze(2)).squeeze(2)
+        e_t = torch.squeeze(
+            torch.bmm(enc_hiddens_proj, torch.unsqueeze(dec_hidden, 2)), 2)
+
+        ### END YOUR CODE FROM ASSIGNMENT 4
+
 
         # Set e_t to -inf where enc_masks has 1
         if enc_masks is not None:
@@ -248,6 +258,7 @@ class NMT(nn.Module):
 
     def generate_sent_masks(self, enc_hiddens: torch.Tensor, source_lengths: List[int]) -> torch.Tensor:
         """ Generate sentence masks for encoder hidden states.
+
         @param enc_hiddens (Tensor): encodings of shape (b, src_len, 2*h), where b = batch size,
                                      src_len = max source length, h = hidden size.
         @param source_lengths (List[int]): List of actual lengths for each of the sentences in the batch.
@@ -260,8 +271,8 @@ class NMT(nn.Module):
             enc_masks[e_id, src_len:] = 1
         return enc_masks.to(self.device)
 
-    def beam_search(self, src_sent: List[str], beam_size: int = 5, max_decoding_time_step: int = 70) -> List[
-        Hypothesis]:
+
+    def beam_search(self, src_sent: List[str], beam_size: int=5, max_decoding_time_step: int=70) -> List[Hypothesis]:
         """ Given a single source sentence, perform beam search, yielding translations in the target language.
         @param src_sent (List[str]): a single source sentence (words)
         @param beam_size (int): beam size
@@ -288,6 +299,7 @@ class NMT(nn.Module):
         hyp_scores = torch.zeros(len(hypotheses), dtype=torch.float, device=self.device)
         completed_hypotheses = []
 
+
         t = 0
         while len(completed_hypotheses) < beam_size and t < max_decoding_time_step:
             t += 1
@@ -310,10 +322,11 @@ class NMT(nn.Module):
             y_t_embed = self.model_embeddings_target(y_tm1)
             y_t_embed = torch.squeeze(y_t_embed, dim=0)
 
+
             x = torch.cat([y_t_embed, att_tm1], dim=-1)
 
-            (h_t, cell_t), att_t, _ = self.step(x, h_tm1,
-                                                exp_src_encodings, exp_src_encodings_att_linear, enc_masks=None)
+            (h_t, cell_t), att_t, _  = self.step(x, h_tm1,
+                                                      exp_src_encodings, exp_src_encodings_att_linear, enc_masks=None)
 
             # log probabilities over target words
             log_p_t = F.log_softmax(self.target_vocab_projection(att_t), dim=-1)
@@ -339,8 +352,8 @@ class NMT(nn.Module):
 
                 # Record output layer in case UNK was generated
                 if hyp_word == "<unk>":
-                    hyp_word = "<unk>" + str(len(decoderStatesForUNKsHere))
-                    decoderStatesForUNKsHere.append(att_t[prev_hyp_id])
+                   hyp_word = "<unk>"+str(len(decoderStatesForUNKsHere))
+                   decoderStatesForUNKsHere.append(att_t[prev_hyp_id])
 
                 new_hyp_sent = hypotheses[prev_hyp_id] + [hyp_word]
                 if hyp_word == '</s>':
@@ -351,15 +364,13 @@ class NMT(nn.Module):
                     live_hyp_ids.append(prev_hyp_id)
                     new_hyp_scores.append(cand_new_hyp_score)
 
-            if len(decoderStatesForUNKsHere) > 0 and self.charDecoder is not None:  # decode UNKs
+            if len(decoderStatesForUNKsHere) > 0 and self.charDecoder is not None: # decode UNKs
                 decoderStatesForUNKsHere = torch.stack(decoderStatesForUNKsHere, dim=0)
-                decodedWords = self.charDecoder.decode_greedy(
-                    (decoderStatesForUNKsHere.unsqueeze(0), decoderStatesForUNKsHere.unsqueeze(0)), max_length=21,
-                    device=self.device)
+                decodedWords = self.charDecoder.decode_greedy((decoderStatesForUNKsHere.unsqueeze(0), decoderStatesForUNKsHere.unsqueeze(0)), max_length=21, device=self.device)
                 assert len(decodedWords) == decoderStatesForUNKsHere.size()[0], "Incorrect number of decoded words"
                 for hyp in new_hypotheses:
-                    if hyp[-1].startswith("<unk>"):
-                        hyp[-1] = decodedWords[int(hyp[-1][5:])]  # [:-1]
+                  if hyp[-1].startswith("<unk>"):
+                        hyp[-1] = decodedWords[int(hyp[-1][5:])]#[:-1]
 
             if len(completed_hypotheses) == beam_size:
                 break
@@ -403,8 +414,7 @@ class NMT(nn.Module):
         print('save model parameters to [%s]' % path, file=sys.stderr)
 
         params = {
-            'args': dict(embed_size=self.model_embeddings_source.embed_size, hidden_size=self.hidden_size,
-                         dropout_rate=self.dropout_rate),
+            'args': dict(embed_size=self.model_embeddings_source.embed_size, hidden_size=self.hidden_size, dropout_rate=self.dropout_rate),
             'vocab': self.vocab,
             'state_dict': self.state_dict()
         }
